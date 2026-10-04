@@ -1,0 +1,252 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LP = Players.LocalPlayer
+
+local spinActive = false
+local followActive = false
+local selectedPlayer = nil -- Тек бір таңдалған таргет
+
+local spinAngle = 0
+local SPIN_SPEED = 16
+local HEIGHT = 8
+
+-- --- GUI ҚҰРУ ---
+local gui = Instance.new("ScreenGui")
+gui.Name = "DeltaDualHubV4"
+gui.Parent = game.CoreGui
+gui.ResetOnSpawn = false
+
+-- 1. FAST SPIN Батырмасы
+local spinBtn = Instance.new("TextButton")
+spinBtn.Size = UDim2.new(0, 140, 0, 35)
+spinBtn.Position = UDim2.new(0, 10, 0, 10)
+spinBtn.Text = "FAST SPIN: OFF"
+spinBtn.BackgroundColor3 = Color3.fromRGB(220, 30, 30)
+spinBtn.TextColor3 = Color3.new(1, 1, 1)
+spinBtn.TextScaled = true
+spinBtn.Parent = gui
+Instance.new("UICorner", spinBtn).CornerRadius = UDim.new(0, 8)
+
+-- 2. FOLLOW Батырмасы
+local followBtn = Instance.new("TextButton")
+followBtn.Size = UDim2.new(0, 140, 0, 35)
+followBtn.Position = UDim2.new(0, 10, 0, 50)
+followBtn.Text = "FOLLOW: OFF"
+followBtn.BackgroundColor3 = Color3.fromRGB(220, 30, 30)
+followBtn.TextColor3 = Color3.new(1, 1, 1)
+followBtn.TextScaled = true
+followBtn.Parent = gui
+Instance.new("UICorner", followBtn).CornerRadius = UDim.new(0, 8)
+
+-- 3. Player List Батырмалары
+local toggleListBtn = Instance.new("TextButton")
+toggleListBtn.Size = UDim2.new(0, 170, 0, 35)
+toggleListBtn.Position = UDim2.new(1, -180, 0, 10)
+toggleListBtn.Text = "PLAYER LIST: ON"
+toggleListBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+toggleListBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleListBtn.TextScaled = true
+toggleListBtn.Parent = gui
+Instance.new("UICorner", toggleListBtn).CornerRadius = UDim.new(0, 8)
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size = UDim2.new(0, 170, 0, 30)
+refreshBtn.Position = UDim2.new(1, -180, 0, 50)
+refreshBtn.Text = "🔄 REFRESH LIST"
+refreshBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+refreshBtn.TextColor3 = Color3.new(1, 1, 1)
+refreshBtn.TextScaled = true
+refreshBtn.Parent = gui
+Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 8)
+
+local listFrame = Instance.new("ScrollingFrame")
+listFrame.Size = UDim2.new(0, 170, 0, 260)
+listFrame.Position = UDim2.new(1, -180, 0, 85)
+listFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+listFrame.BackgroundTransparency = 0.2
+listFrame.BorderSizePixel = 0
+listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+listFrame.Parent = gui
+Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = listFrame
+
+-- --- ХИТБОКС ---
+local function applyHitbox(hrp, enable)
+	if not hrp or not hrp:IsA("BasePart") then return end
+	if enable then
+		hrp.Size = Vector3.new(12, 12, 12)
+		hrp.Transparency = 0.7
+		hrp.Material = Enum.Material.ForceField
+		hrp.Color = Color3.fromRGB(255, 255, 255)
+		hrp.CanCollide = false
+	else
+		if hrp.Size ~= Vector3.new(2, 2, 1) then
+			hrp.Size = Vector3.new(2, 2, 1)
+			hrp.Transparency = 1
+			hrp.Material = Enum.Material.Plastic
+		end
+	end
+end
+
+-- --- ТАҢДАЛҒАН ТАРГЕТТІ АЛУ ---
+local function getTarget()
+	-- Егер Player List-тен адам таңдалса, тек соны қайтарады
+	if selectedPlayer and selectedPlayer.Character then
+		local humanoid = selectedPlayer.Character:FindFirstChildOfClass("Humanoid")
+		local hrp = selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if humanoid and humanoid.Health > 0 and hrp then
+			return hrp
+		end
+	end
+
+	-- Егер Player List-тен ешкім таңдалмаса, ең жақын адамды іздейді
+	if not selectedPlayer then
+		local char = LP.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+		local root = char.HumanoidRootPart
+		local closest, dist = nil, math.huge
+
+		for _, p in pairs(Players:GetPlayers()) do
+			if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+				local humanoid = p.Character:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					local enemy = p.Character.HumanoidRootPart
+					local d = (root.Position - enemy.Position).Magnitude
+					if d < dist then
+						dist = d
+						closest = enemy
+					end
+				end
+			end
+		end
+		return closest
+	end
+
+	return nil
+end
+
+-- --- ТІЗІМДІ ЖАҢАРТУ (ТАРГЕТ ТАНДАУ) ---
+local function updatePlayerList()
+	for _, child in pairs(listFrame:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LP then
+			local pBtn = Instance.new("TextButton")
+			pBtn.Size = UDim2.new(1, -10, 0, 32)
+			pBtn.Text = p.DisplayName or p.Name
+			pBtn.TextScaled = true
+			pBtn.TextColor3 = Color3.new(1, 1, 1)
+			Instance.new("UICorner", pBtn).CornerRadius = UDim.new(0, 6)
+
+			-- Таңдалған ойыншы жасыл түспен белгіленеді
+			if selectedPlayer == p then
+				pBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 50)
+			else
+				pBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+			end
+
+			pBtn.MouseButton1Click:Connect(function()
+				if selectedPlayer == p then
+					selectedPlayer = nil -- Екінші рет басса таңдауды алып тастайды
+				else
+					selectedPlayer = p -- Жаңа таргетті белгілейді
+				end
+				updatePlayerList()
+			end)
+			pBtn.Parent = listFrame
+		end
+	end
+end
+
+refreshBtn.MouseButton1Click:Connect(updatePlayerList)
+Players.PlayerAdded:Connect(function() task.wait(0.5); updatePlayerList() end)
+Players.PlayerRemoving:Connect(function(player) 
+	if selectedPlayer == player then selectedPlayer = nil end
+	updatePlayerList() 
+end)
+updatePlayerList()
+
+toggleListBtn.MouseButton1Click:Connect(function()
+	listFrame.Visible = not listFrame.Visible
+	refreshBtn.Visible = listFrame.Visible
+	toggleListBtn.Text = listFrame.Visible and "PLAYER LIST: ON" or "PLAYER LIST: OFF"
+	toggleListBtn.BackgroundColor3 = listFrame.Visible and Color3.fromRGB(40, 40, 40) or Color3.fromRGB(20, 20, 20)
+end)
+
+spinBtn.MouseButton1Click:Connect(function()
+	spinActive = not spinActive
+	if spinActive then followActive = false; followBtn.Text = "FOLLOW: OFF"; followBtn.BackgroundColor3 = Color3.fromRGB(220, 30, 30) end
+	spinBtn.Text = spinActive and "FAST SPIN: ON" or "FAST SPIN: OFF"
+	spinBtn.BackgroundColor3 = spinActive and Color3.fromRGB(0, 180, 50) or Color3.fromRGB(220, 30, 30)
+end)
+
+followBtn.MouseButton1Click:Connect(function()
+	followActive = not followActive
+	if followActive then spinActive = false; spinBtn.Text = "FAST SPIN: OFF"; spinBtn.BackgroundColor3 = Color3.fromRGB(220, 30, 30) end
+	followBtn.Text = followActive and "FOLLOW: ON" or "FOLLOW: OFF"
+	followBtn.BackgroundColor3 = followActive and Color3.fromRGB(0, 180, 50) or Color3.fromRGB(220, 30, 30)
+end)
+
+-- --- NOCLIP (STEPPED) ---
+RunService.Stepped:Connect(function()
+	if spinActive or followActive then
+		local char = LP.Character
+		if char then
+			for _, part in pairs(char:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = false
+				end
+			end
+		end
+	end
+end)
+
+-- --- НЕГІЗГІ ҚОЗҒАЛЫС (HEARTBEAT) ---
+RunService.Heartbeat:Connect(function(deltaTime)
+	local char = LP.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") or not char:FindFirstChildOfClass("Humanoid") then return end
+	local root = char.HumanoidRootPart
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+
+	if humanoid.Health <= 0 then return end
+
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+
+	local currentTarget = getTarget()
+
+	-- Хитбокс тек таңдалған/таргеттегі ойыншыға қолданылады
+	for _, p in pairs(Players:GetPlayers()) do
+		if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+			local hrp = p.Character.HumanoidRootPart
+			applyHitbox(hrp, (spinActive or followActive) and currentTarget and hrp == currentTarget)
+		end
+	end
+
+	-- Қозғалыс
+	if (spinActive or followActive) and currentTarget and currentTarget.Parent then
+		local enemyPos = currentTarget.Position
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+
+		if spinActive then
+			spinAngle = spinAngle + (deltaTime * SPIN_SPEED)
+			local radius = 3.5
+			local targetPos = enemyPos + Vector3.new(math.cos(spinAngle) * radius, HEIGHT, math.sin(spinAngle) * radius)
+			
+			char:PivotTo(CFrame.new(targetPos, enemyPos))
+
+		elseif followActive then
+			local targetPos = enemyPos + Vector3.new(0, HEIGHT, 0)
+			
+			char:PivotTo(CFrame.new(targetPos, enemyPos))
+		end
+	end
+end)
